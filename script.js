@@ -1,16 +1,22 @@
-// Modal error popup logic
-const modalError = document.getElementById('modalError');
-const modalMsg = document.getElementById('modalMsg');
-const modalClose = document.getElementById('modalClose');
-function showModalError(msg) {
-  modalMsg.textContent = msg;
-  modalError.style.display = 'flex';
+// Show short error in result area but log full details to console
+function showModalError(detail) {
+  // detail may be an Error or a string; log full information for debugging
+  if (detail instanceof Error) {
+    console.error('Calculator error:', detail.message);
+    if (detail.stack) console.error(detail.stack);
+  } else {
+    console.error('Calculator error:', detail);
+  }
+
+  // UI should show only short error text
+  outputEl.textContent = 'Error';
+  outputEl.classList.remove('final-result', 'preview-result');
+  outputEl.style.color = '#d32f2f';
 }
-modalClose.onclick = function() {
-  modalError.style.display = 'none';
-}
-window.onclick = function(event) {
-  if (event.target === modalError) modalError.style.display = 'none';
+
+function hideModalError() {
+  outputEl.classList.remove('final-result');
+  outputEl.classList.add('preview-result');
 }
 // Simple calculator with variable support
 const displayEl = document.getElementById('display');
@@ -98,51 +104,86 @@ addVarBtn.addEventListener('click', ()=>{
 settingsBtn.addEventListener('click', ()=>{ panel.classList.add('open'); });
 closePanel.addEventListener('click', ()=>{ panel.classList.remove('open'); });
 
-// keypad generation
-const labels = ['7','8','9','4','5','6','1','2','3','0','.'];
-labels.forEach(l=>{
-  const b = document.createElement('button'); b.className='btn'; b.type = 'button'; b.textContent = l;
-  b.addEventListener('click', ()=>{ insertText(l); });
-  if(l==='0'){ b.classList.add('zero'); b.style.gridColumn='1/3'; }
-  gridEl.appendChild(b);
+// Add click handlers to number buttons
+document.querySelectorAll('.grid .btn:not(.op):not(#btnC):not(#btnCE):not(#btnParen):not(#btnEquals)').forEach(btn => {
+  btn.addEventListener('click', () => {
+    insertText(btn.textContent);
+  });
 });
 
 
 function insertText(s) {
-  // If last was equals, allow continuous calculation unless C or double ==
+  // Handle operator after result for continuous calculation
   if (lastWasEquals) {
     lastWasEquals = false;
     equalsCount = 0;
-    // If user enters operator, continue with result
-    if (/^[+\-*/]$/.test(s)) {
-      expr = outputEl.textContent || '';
+    
+    if (/^[+\-*/÷]$/.test(s)) {
+      // Use the result for continued calculation
+      expr = outputEl.textContent || '0';
+      displayEl.textContent = expr;
     } else {
+      // Start new calculation for numbers and other inputs
       expr = '';
       outputEl.textContent = '';
+  outputEl.classList.remove('final-result');
+  outputEl.classList.add('preview-result');
     }
   }
 
-  // Prevent invalid input: no double operators, no leading operator, no multiple decimals in a number
+  // Validate input before adding
   const lastChar = expr.trim().slice(-1);
+  
   if (/^[+\-*/]$/.test(s)) {
-    if (expr === '' || /^[+\-*/.\s]$/.test(lastChar)) {
-      showModalError('Invalid operator placement');
+    // Operator validation
+    if (expr === '') {
+      showModalError('Cannot start with an operator');
+      return;
+    }
+    if (/^[+\-*/.\s]$/.test(lastChar)) {
+      showModalError('Cannot have two operators in a row');
       return;
     }
     expr += ' ' + s + ' ';
   } else if (s === '.') {
-    // Prevent multiple decimals in a number
-    const parts = expr.split(/[^0-9.]+/);
-    if (parts[parts.length - 1].includes('.')) {
-      showModalError('Multiple decimals in a number');
+    // Decimal point validation
+    const parts = expr.split(/[+\-*/\s()]+/);
+    const currentNum = parts[parts.length - 1] || '';
+    if (currentNum.includes('.')) {
+      showModalError('Number already has a decimal point');
+      return;
+    }
+    if (!/^\d*$/.test(currentNum)) {
+      showModalError('Invalid decimal point placement');
+      return;
+    }
+    expr += s;
+  } else if (s === '(') {
+    // Opening parenthesis validation
+    if (lastChar && !/^[+\-*/(\s]$/.test(lastChar)) {
+      showModalError('Invalid placement of opening parenthesis');
+      return;
+    }
+    expr += s;
+  } else if (s === ')') {
+    // Closing parenthesis validation
+    const openCount = (expr.match(/\(/g) || []).length;
+    const closeCount = (expr.match(/\)/g) || []).length;
+    if (closeCount >= openCount) {
+      showModalError('No matching opening parenthesis');
+      return;
+    }
+    if (/^[+\-*/(\s]$/.test(lastChar)) {
+      showModalError('Invalid placement of closing parenthesis');
       return;
     }
     expr += s;
   } else {
     expr += s;
   }
+  
   displayEl.textContent = expr || '0';
-  hideError();
+  hideModalError();
   livePreview();
 }
 
@@ -151,7 +192,8 @@ btnC.addEventListener('click', ()=>{
   expr='';
   displayEl.textContent='0';
   outputEl.textContent='';
-  outputEl.style.color = '#bbb';
+  outputEl.classList.remove('final-result');
+  outputEl.classList.add('preview-result');
   hideError();
   equalsCount = 0;
 });
@@ -167,11 +209,20 @@ btnParen.addEventListener('click', ()=>{ insertText('('); });
 
 // operator buttons
 document.querySelectorAll('.op').forEach(b=>{
-  b.addEventListener('click', ()=>{ insertText(' '+b.dataset.op+' '); });
+  b.addEventListener('click', ()=>{ 
+    // For division, always use '/' internally even if button shows '÷'
+    const op = b.dataset.op === '÷' ? '/' : b.dataset.op;
+    insertText(op);
+  });
 });
 
 
 btnEquals.addEventListener('click', ()=>{
+  // Do nothing if expression is empty
+  if (!expr.trim()) {
+    return;
+  }
+  
   equalsCount++;
   if (equalsCount >= 2) {
     expr = '';
@@ -186,28 +237,141 @@ btnEquals.addEventListener('click', ()=>{
 });
 
 
+function validateExpr(e) {
+  // Normalize division operator from '÷' to '/'
+  e = e.replace(/÷/g, '/');
+  
+  // Debug: log normalized expression
+  try { console.debug('validateExpr normalized:', JSON.stringify(e)); } catch (err) {}
+
+  // Check for any validation errors
+  if (!/^[0-9+\-*/().\s]+$/.test(e)) {
+    // Log which characters are invalid
+    const invalid = e.match(/[^0-9+\-*/().\s]/g) || [];
+    console.error('validateExpr: invalid characters found:', invalid, 'raw:', JSON.stringify(e));
+    throw new Error('Error');
+  }
+
+  const stripped = e.replace(/\s+/g, '');
+  if (/[+\-*/]{2,}/.test(stripped) || /^[+\-*/]/.test(stripped) || /[+\-*/]$/.test(stripped)) {
+    throw new Error('Error');
+  }
+
+  const openCount = (e.match(/\(/g) || []).length;
+  const closeCount = (e.match(/\)/g) || []).length;
+  if (openCount !== closeCount || /\(\s*\)/.test(e)) {
+    throw new Error('Error');
+  }
+
+  const parts = e.split(/[+\-*/()]/);
+  for (const part of parts) {
+    if (part.trim().split('.').length > 2) {
+      throw new Error('Error');
+    }
+  }
+}
+
+function calculate(expression) {
+  // Remove all spaces and handle minus signs
+  expression = expression.replace(/\s+/g, '');
+  
+  // First handle parentheses recursively
+  while (expression.includes('(')) {
+    expression = expression.replace(/\([^()]+\)/g, match => {
+      return calculate(match.slice(1, -1));
+    });
+  }
+
+  // Convert expression to infix notation array
+  const tokens = [];
+  let num = '';
+  
+  for (let i = 0; i < expression.length; i++) {
+    const char = expression[i];
+    if (char >= '0' && char <= '9' || char === '.') {
+      num += char;
+    } else {
+      if (num !== '') {
+        tokens.push(parseFloat(num));
+        num = '';
+      }
+      if ('+-*/'.includes(char)) {
+        tokens.push(char);
+      }
+    }
+  }
+  if (num !== '') {
+    tokens.push(parseFloat(num));
+  }
+
+  // Handle multiplication and division first
+  let i = 1;
+  while (i < tokens.length - 1) {
+    if (tokens[i] === '*' || tokens[i] === '/') {
+      const left = tokens[i - 1];
+      const right = tokens[i + 1];
+      let result;
+
+      if (tokens[i] === '*') {
+        result = left * right;
+      } else {
+        if (right === 0) throw new Error('Error');
+        result = left / right;
+      }
+
+      tokens.splice(i - 1, 3, result);
+    } else {
+      i += 2;
+    }
+  }
+
+  // Handle addition and subtraction
+  let result = tokens[0];
+  for (let i = 1; i < tokens.length; i += 2) {
+    if (tokens[i] === '+') result += tokens[i + 1];
+    if (tokens[i] === '-') result -= tokens[i + 1];
+  }
+
+  if (!isFinite(result)) throw new Error('Error');
+  
+  // Format to remove trailing zeros and unnecessary decimals
+  return result.toString().replace(/\.?0+$/, '');
+}
+
 function evaluateExpr() {
   try {
-    let e = expr;
-    const vars = loadVars();
+    // Normalize division operator from '÷' to '/'
+    let e = expr.replace(/÷/g, '/');
+    console.debug('evaluateExpr using expr:', JSON.stringify(e));
+    const vars = loadVars();    // Replace variables with values
     Object.keys(vars).sort((a, b) => b.length - a.length).forEach(k => {
       const re = new RegExp('\\b' + k + '\\b', 'g');
       e = e.replace(re, String(vars[k]));
     });
-    if (!/^[0-9+\-*/().\s]+$/.test(e)) throw new Error('Invalid characters');
-    // Check for invalid operator placement
-    if (/([+\-*/]{2,})|(^[+\-*/])|([+\-*/]$)/.test(e.replace(/\s+/g, ''))) throw new Error('Invalid operator placement');
-    // Check for unbalanced parentheses
-    if ((e.match(/\(/g) || []).length !== (e.match(/\)/g) || []).length) throw new Error('Unbalanced parentheses');
-    const result = Function('return (' + e + ');')();
-    outputEl.textContent = String(result);
-    outputEl.style.color = '#222';
+
+    // Validate the expression
+    validateExpr(e);
+
+    // Prefer JS evaluator for correct arithmetic (division, precedence)
+    let numericResult;
+    try {
+      numericResult = Function('return (' + e + ');')();
+      if (!isFinite(numericResult)) throw new Error('Error');
+    } catch (inner) {
+      // Fallback to custom parser if Function() fails
+      numericResult = Number(calculate(e));
+      if (!isFinite(numericResult)) throw new Error('Error');
+    }
+
+  outputEl.textContent = String(numericResult);
+  outputEl.classList.remove('preview-result');
+  outputEl.classList.add('final-result');
     displayEl.textContent = expr;
-    expr = String(result);
+    expr = String(numericResult);
     lastWasEquals = true;
-    hideError();
+    hideModalError();
   } catch (err) {
-    showError('Invalid expression: ' + err.message);
+    showModalError(err);
   }
 }
 
@@ -226,9 +390,15 @@ function livePreview() {
     if (!/^[0-9+\-*/().\s]+$/.test(e)) throw new Error('');
     if (/([+\-*/]{2,})|(^[+\-*/])|([+\-*/]$)/.test(e.replace(/\s+/g, ''))) throw new Error('');
     if ((e.match(/\(/g) || []).length !== (e.match(/\)/g) || []).length) throw new Error('');
-    const result = Function('return (' + e + ');')();
-    outputEl.textContent = String(result);
-    outputEl.style.color = '#bbb';
+    // Use JS evaluator for live preview; fallback to calculate()
+    try {
+      const preview = Function('return (' + e + ');')();
+      outputEl.textContent = String(preview);
+    } catch {
+      outputEl.textContent = calculate(e);
+    }
+    outputEl.classList.remove('final-result');
+    outputEl.classList.add('preview-result');
     hideError();
   } catch {
     outputEl.textContent = '';
@@ -248,4 +418,5 @@ function hideError() {
 // initialize
 renderVars();
 panel.classList.remove('open');
-outputEl.style.color = '#bbb';
+outputEl.classList.remove('final-result');
+outputEl.classList.add('preview-result');
