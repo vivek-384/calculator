@@ -126,8 +126,8 @@ function insertText(s) {
       // Start new calculation for numbers and other inputs
       expr = '';
       outputEl.textContent = '';
-  outputEl.classList.remove('final-result');
-  outputEl.classList.add('preview-result');
+      outputEl.classList.remove('final-result');
+      outputEl.classList.add('preview-result');
     }
   }
 
@@ -135,7 +135,6 @@ function insertText(s) {
   const lastChar = expr.trim().slice(-1);
   
   if (/^[+\-*/]$/.test(s)) {
-    // Operator validation
     if (expr === '') {
       showModalError('Cannot start with an operator');
       return;
@@ -146,7 +145,6 @@ function insertText(s) {
     }
     expr += ' ' + s + ' ';
   } else if (s === '.') {
-    // Decimal point validation
     const parts = expr.split(/[+\-*/\s()]+/);
     const currentNum = parts[parts.length - 1] || '';
     if (currentNum.includes('.')) {
@@ -159,14 +157,12 @@ function insertText(s) {
     }
     expr += s;
   } else if (s === '(') {
-    // Opening parenthesis validation
     if (lastChar && !/^[+\-*/(\s]$/.test(lastChar)) {
       showModalError('Invalid placement of opening parenthesis');
       return;
     }
     expr += s;
   } else if (s === ')') {
-    // Closing parenthesis validation
     const openCount = (expr.match(/\(/g) || []).length;
     const closeCount = (expr.match(/\)/g) || []).length;
     if (closeCount >= openCount) {
@@ -210,7 +206,6 @@ btnParen.addEventListener('click', ()=>{ insertText('('); });
 // operator buttons
 document.querySelectorAll('.op').forEach(b=>{
   b.addEventListener('click', ()=>{ 
-    // For division, always use '/' internally even if button shows '÷'
     const op = b.dataset.op === '÷' ? '/' : b.dataset.op;
     insertText(op);
   });
@@ -218,7 +213,6 @@ document.querySelectorAll('.op').forEach(b=>{
 
 
 btnEquals.addEventListener('click', ()=>{
-  // Do nothing if expression is empty
   if (!expr.trim()) {
     return;
   }
@@ -238,15 +232,11 @@ btnEquals.addEventListener('click', ()=>{
 
 
 function validateExpr(e) {
-  // Normalize division operator from '÷' to '/'
   e = e.replace(/÷/g, '/');
   
-  // Debug: log normalized expression
   try { console.debug('validateExpr normalized:', JSON.stringify(e)); } catch (err) {}
 
-  // Check for any validation errors
   if (!/^[0-9+\-*/().\s]+$/.test(e)) {
-    // Log which characters are invalid
     const invalid = e.match(/[^0-9+\-*/().\s]/g) || [];
     console.error('validateExpr: invalid characters found:', invalid, 'raw:', JSON.stringify(e));
     throw new Error('Error');
@@ -272,17 +262,14 @@ function validateExpr(e) {
 }
 
 function calculate(expression) {
-  // Remove all spaces and handle minus signs
   expression = expression.replace(/\s+/g, '');
   
-  // First handle parentheses recursively
   while (expression.includes('(')) {
     expression = expression.replace(/\([^()]+\)/g, match => {
       return calculate(match.slice(1, -1));
     });
   }
 
-  // Convert expression to infix notation array
   const tokens = [];
   let num = '';
   
@@ -304,7 +291,6 @@ function calculate(expression) {
     tokens.push(parseFloat(num));
   }
 
-  // Handle multiplication and division first
   let i = 1;
   while (i < tokens.length - 1) {
     if (tokens[i] === '*' || tokens[i] === '/') {
@@ -325,7 +311,6 @@ function calculate(expression) {
     }
   }
 
-  // Handle addition and subtraction
   let result = tokens[0];
   for (let i = 1; i < tokens.length; i += 2) {
     if (tokens[i] === '+') result += tokens[i + 1];
@@ -334,38 +319,36 @@ function calculate(expression) {
 
   if (!isFinite(result)) throw new Error('Error');
   
-  // Format to remove trailing zeros and unnecessary decimals
-  return result.toString().replace(/\.?0+$/, '');
+  return result;
 }
 
 function evaluateExpr() {
   try {
-    // Normalize division operator from '÷' to '/'
     let e = expr.replace(/÷/g, '/');
     console.debug('evaluateExpr using expr:', JSON.stringify(e));
-    const vars = loadVars();    // Replace variables with values
+    const vars = loadVars();
     Object.keys(vars).sort((a, b) => b.length - a.length).forEach(k => {
       const re = new RegExp('\\b' + k + '\\b', 'g');
       e = e.replace(re, String(vars[k]));
     });
 
-    // Validate the expression
     validateExpr(e);
 
-    // Prefer JS evaluator for correct arithmetic (division, precedence)
     let numericResult;
     try {
       numericResult = Function('return (' + e + ');')();
       if (!isFinite(numericResult)) throw new Error('Error');
     } catch (inner) {
-      // Fallback to custom parser if Function() fails
       numericResult = Number(calculate(e));
       if (!isFinite(numericResult)) throw new Error('Error');
     }
 
-  outputEl.textContent = String(numericResult);
-  outputEl.classList.remove('preview-result');
-  outputEl.classList.add('final-result');
+    // ✅ Show only up to 3 decimals
+    outputEl.textContent = 
+      (typeof numericResult === 'number' ? parseFloat(numericResult.toFixed(3)) : String(numericResult));
+
+    outputEl.classList.remove('preview-result');
+    outputEl.classList.add('final-result');
     displayEl.textContent = expr;
     expr = String(numericResult);
     lastWasEquals = true;
@@ -390,12 +373,14 @@ function livePreview() {
     if (!/^[0-9+\-*/().\s]+$/.test(e)) throw new Error('');
     if (/([+\-*/]{2,})|(^[+\-*/])|([+\-*/]$)/.test(e.replace(/\s+/g, ''))) throw new Error('');
     if ((e.match(/\(/g) || []).length !== (e.match(/\)/g) || []).length) throw new Error('');
-    // Use JS evaluator for live preview; fallback to calculate()
     try {
       const preview = Function('return (' + e + ');')();
-      outputEl.textContent = String(preview);
+      outputEl.textContent = 
+        (typeof preview === 'number' ? parseFloat(preview.toFixed(3)) : String(preview));
     } catch {
-      outputEl.textContent = calculate(e);
+      const val = calculate(e);
+      outputEl.textContent = 
+        (typeof val === 'number' ? parseFloat(val.toFixed(3)) : String(val));
     }
     outputEl.classList.remove('final-result');
     outputEl.classList.add('preview-result');
